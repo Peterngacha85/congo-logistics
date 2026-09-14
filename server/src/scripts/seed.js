@@ -2,7 +2,7 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const { connectDatabase } = require('../config/database');
-const { ensureSuperAdmin } = require('../config/bootstrapAdmin');
+const { ensureSuperAdmins } = require('../config/bootstrapAdmin');
 const User = require('../models/User');
 const Branch = require('../models/Branch');
 const Trip = require('../models/Trip');
@@ -16,7 +16,7 @@ async function seed() {
   await User.deleteMany({ role: ROLES.BRANCH_MANAGER });
   await Branch.deleteMany({});
   await Trip.deleteMany({});
-  await ensureSuperAdmin();
+  await ensureSuperAdmins();
 
   const branches = await Branch.insertMany([
     {
@@ -86,9 +86,16 @@ async function seed() {
     createdBy: managers[0]._id
   });
 
+  const adminEmails = [1, 2, 3]
+    .map((i) => process.env[`ADMIN_${i}_EMAIL`])
+    .filter(Boolean)
+    .concat(process.env.ADMIN_EMAIL ? [process.env.ADMIN_EMAIL] : []);
+
   console.log('Database seeded successfully!');
   console.log('\nTest Credentials:');
-  console.log(`Super Admin - Email: ${process.env.ADMIN_EMAIL}, Password: (from .env) - login at /api/v1/admin/auth/login`);
+  console.log(
+    `Super Admin(s) - Email(s): ${adminEmails.join(', ') || '(none configured)'}, Password: (from .env) - login at /api/v1/admin/auth/login`
+  );
   console.log('Manager 1 (Kinshasa) - Email: john@test.com, Password: Manager123!');
   console.log('Manager 2 (Lubumbashi) - Email: jane@test.com, Password: Manager123!');
 

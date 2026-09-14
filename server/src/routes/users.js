@@ -10,6 +10,7 @@ router.use(requireAuth);
 router.get('/', userController.listUsers);
 router.get('/:userId', userController.getUser);
 router.put('/:userId', requireRole(ROLES.SUPER_ADMIN), userController.updateUser);
+router.put('/:userId/approve', requireRole(ROLES.SUPER_ADMIN), userController.approveUser);
 router.delete('/:userId', requireRole(ROLES.SUPER_ADMIN), userController.deleteUser);
 
 module.exports = router;

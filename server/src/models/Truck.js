@@ -24,13 +24,24 @@ const truckSchema = new mongoose.Schema(
     totalTripsCompleted: { type: Number, default: 0 },
 
     gpsDeviceId: String,
-    hasGPS: { type: Boolean, default: false }
+    hasGPS: { type: Boolean, default: false },
+
+    // Gatekeeping for manager-submitted trucks, separate from the operational
+    // `status` above: a truck a manager adds isn't selectable on a trip until
+    // an admin approves it. Admin-created trucks are approved immediately.
+    approvalStatus: {
+      type: String,
+      enum: ['PENDING_APPROVAL', 'APPROVED'],
+      default: 'APPROVED'
+    },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
   },
   { timestamps: true }
 );
 
 truckSchema.index({ branchId: 1 });
 truckSchema.index({ status: 1 });
+truckSchema.index({ approvalStatus: 1 });
 truckSchema.index({ licensePlate: 1 });
 
 module.exports = mongoose.model('Truck', truckSchema);

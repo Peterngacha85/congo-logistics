@@ -1,3 +1,5 @@
+const path = require('path');
+const fs = require('fs');
 const Invoice = require('../models/Invoice');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
@@ -5,7 +7,7 @@ const { ROLES } = require('../config/constants');
 
 // GET /invoices
 const listInvoices = asyncHandler(async (req, res) => {
-  const { page = 1, limit = 50, status, dateFrom, dateTo } = req.query;
+  const { page = 1, limit = 50, status, dateFrom, dateTo, search } = req.query;
   const query = {};
 
   if (req.user.role === ROLES.BRANCH_MANAGER) {
@@ -20,13 +22,19 @@ const listInvoices = asyncHandler(async (req, res) => {
     if (dateFrom) query.invoiceDate.$gte = new Date(dateFrom);
     if (dateTo) query.invoiceDate.$lte = new Date(dateTo);
   }
+  if (search) {
+    query.$or = [
+      { invoiceNumber: { $regex: search, $options: 'i' } },
+      { transporterName: { $regex: search, $options: 'i' } }
+    ];
+  }
 
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const limitNum = Math.min(200, Math.max(1, parseInt(limit, 10) || 50));
 
   const [invoices, total] = await Promise.all([
     Invoice.find(query)
-      .populate('tripId', 'tripNumber')
+      .populate('tripId', 'tripNumber truckNumber')
       .sort({ invoiceDate: -1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum),
@@ -38,7 +46,9 @@ const listInvoices = asyncHandler(async (req, res) => {
     data: invoices.map((inv) => ({
       _id: inv._id,
       invoiceNumber: inv.invoiceNumber,
+      tripId: inv.tripId?._id,
       tripNumber: inv.tripId?.tripNumber,
+      truckNumber: inv.tripId?.truckNumber,
       transporterName: inv.transporterName,
       totalAmount: inv.totalAmount,
       status: inv.status,
@@ -49,14 +59,19 @@ const listInvoices = asyncHandler(async (req, res) => {
       currentPage: pageNum,
       totalPages: Math.ceil(total / limitNum) || 1,
       totalRecords: total,
-      limit: limitNum
+      limit: limitNum,
+      hasNextPage: (pageNum - 1) * limitNum + invoices.length < total,
+      hasPrevPage: pageNum > 1
     }
   });
 });
 
 // GET /invoices/:invoiceId
 const getInvoice = asyncHandler(async (req, res) => {
-  const invoice = await Invoice.findById(req.params.invoiceId).populate('tripId', 'tripNumber loadingPoint offloadingPoint branchId');
+  const invoice = await Invoice.findById(req.params.invoiceId).populate(
+    'tripId',
+    'tripNumber truckNumber loadingPoint offloadingPoint dateLoaded dateOffloaded branchId status'
+  );
   if (!invoice) throw ApiError.notFound('INVOICE_NOT_FOUND', 'Invoice not found');
 
   if (
@@ -73,11 +88,15 @@ const getInvoice = asyncHandler(async (req, res) => {
       invoiceNumber: invoice.invoiceNumber,
       tripNumber: invoice.tripId?.tripNumber,
       tripId: invoice.tripId?._id,
+      truckNumber: invoice.tripId?.truckNumber,
+      tripStatus: invoice.tripId?.status,
       invoiceDate: invoice.invoiceDate,
       dueDate: invoice.dueDate,
       transporterName: invoice.transporterName,
       loadingPoint: invoice.tripId?.loadingPoint,
       offloadingPoint: invoice.tripId?.offloadingPoint,
+      dateLoaded: invoice.tripId?.dateLoaded,
+      dateOffloaded: invoice.tripId?.dateOffloaded,
       lineItems: invoice.lineItems,
       subtotal: invoice.subtotal,
       serviceFee: invoice.serviceFee,
@@ -88,4 +107,24 @@ const getInvoice = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { listInvoices, getInvoice };
+// GET /invoices/:invoiceId/download
+const downloadInvoice = asyncHandler(async (req, res) => {
+  const invoice = await Invoice.findById(req.params.invoiceId);
+  if (!invoice) throw ApiError.notFound('INVOICE_NOT_FOUND', 'Invoice not found');
+
+  if (req.user.role === ROLES.BRANCH_MANAGER && invoice.branchId.toString() !== req.user.branchId) {
+    throw ApiError.forbidden('CROSS_BRANCH_ACCESS', "You don't have access to this data");
+  }
+  if (!invoice.pdfPath) {
+    throw ApiError.notFound('INVOICE_FILE_NOT_FOUND', 'Invoice PDF not found');
+  }
+
+  const absolutePath = path.join(__dirname, '..', '..', 'invoices', path.basename(invoice.pdfPath));
+  if (!fs.existsSync(absolutePath)) {
+    throw ApiError.notFound('INVOICE_FILE_NOT_FOUND', 'Invoice PDF not found');
+  }
+
+  res.download(absolutePath);
+});
+
+module.exports = { listInvoices, getInvoice, downloadInvoice };

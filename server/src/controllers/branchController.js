@@ -2,6 +2,7 @@ const Branch = require('../models/Branch');
 const Trip = require('../models/Trip');
 const Transporter = require('../models/Transporter');
 const Truck = require('../models/Truck');
+const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const auditService = require('../services/auditService');
@@ -123,4 +124,46 @@ const updateBranch = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Branch updated successfully', data: branch });
 });
 
-module.exports = { listBranches, getBranch, createBranch, updateBranch };
+// DELETE /branches/:branchId (Super Admin only) - hard delete, but blocked
+// while anything still references the branch to avoid orphaning data. Admin
+// should reassign or deactivate (isActive: false) those first, or delete them.
+const deleteBranch = asyncHandler(async (req, res) => {
+  const { branchId } = req.params;
+  const branch = await Branch.findById(branchId);
+  if (!branch) throw ApiError.notFound('BRANCH_NOT_FOUND', 'Branch not found');
+
+  const [tripCount, userCount, truckCount, transporterCount] = await Promise.all([
+    Trip.countDocuments({ branchId }),
+    User.countDocuments({ branchId, isDeleted: { $ne: true } }),
+    Truck.countDocuments({ branchId }),
+    Transporter.countDocuments({ branchIds: branchId })
+  ]);
+
+  const blockers = [];
+  if (tripCount > 0) blockers.push(`${tripCount} trip(s)`);
+  if (userCount > 0) blockers.push(`${userCount} user(s)`);
+  if (truckCount > 0) blockers.push(`${truckCount} truck(s)`);
+  if (transporterCount > 0) blockers.push(`${transporterCount} driver(s)`);
+
+  if (blockers.length > 0) {
+    throw ApiError.conflict(
+      'BRANCH_IN_USE',
+      `Cannot delete branch: still referenced by ${blockers.join(', ')}. Reassign or remove them first, or deactivate the branch instead.`
+    );
+  }
+
+  await branch.deleteOne();
+
+  await auditService.log({
+    entityType: 'BRANCH',
+    entityId: branch._id,
+    action: AUDIT_ACTIONS.DELETE,
+    user: req.user,
+    branchId: branch._id,
+    description: `Branch ${branch.branchName} deleted`
+  });
+
+  res.json({ success: true, message: 'Branch deleted successfully' });
+});
+
+module.exports = { listBranches, getBranch, createBranch, updateBranch, deleteBranch };

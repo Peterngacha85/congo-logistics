@@ -41,7 +41,8 @@ const PAYMENT_METHODS = Object.freeze({
 const USER_STATUS = Object.freeze({
   ACTIVE: 'ACTIVE',
   INACTIVE: 'INACTIVE',
-  SUSPENDED: 'SUSPENDED'
+  SUSPENDED: 'SUSPENDED',
+  PENDING_APPROVAL: 'PENDING_APPROVAL'
 });
 
 const INVOICE_STATUS = Object.freeze({
@@ -62,6 +63,24 @@ const AUDIT_ACTIONS = Object.freeze({
   MARK_PAID: 'MARK_PAID'
 });
 
+const SOCKET_EVENTS = Object.freeze({
+  MANAGER_REGISTERED: 'manager:registered',
+  MANAGER_APPROVED: 'manager:approved',
+  MANAGER_REJECTED: 'manager:rejected',
+  TRIP_CREATED: 'trip:created',
+  TRIP_UPDATED: 'trip:updated',
+  TRIP_STATUS_CHANGED: 'trip:statusChanged',
+  TRIP_INVOICED: 'trip:invoiced',
+  TRIP_PAID: 'trip:paid',
+  TRIP_DELETED: 'trip:deleted',
+  TRUCK_REGISTERED: 'truck:registered',
+  TRUCK_APPROVED: 'truck:approved',
+  TRUCK_REJECTED: 'truck:rejected',
+  TRANSPORTER_REGISTERED: 'transporter:registered',
+  TRANSPORTER_APPROVED: 'transporter:approved',
+  TRANSPORTER_REJECTED: 'transporter:rejected'
+});
+
 const SERVICE_FEE_RATE = 0.05;
 
 const MAX_LOGIN_ATTEMPTS = 5;
@@ -76,6 +95,7 @@ module.exports = {
   USER_STATUS,
   INVOICE_STATUS,
   AUDIT_ACTIONS,
+  SOCKET_EVENTS,
   SERVICE_FEE_RATE,
   MAX_LOGIN_ATTEMPTS,
   LOCK_TIME_MS

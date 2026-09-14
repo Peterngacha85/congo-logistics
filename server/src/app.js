@@ -17,6 +17,8 @@ const userRoutes = require('./routes/users');
 const invoiceRoutes = require('./routes/invoices');
 const reportRoutes = require('./routes/reports');
 const auditLogRoutes = require('./routes/auditlogs');
+const truckRoutes = require('./routes/trucks');
+const transporterRoutes = require('./routes/transporters');
 
 function createApp() {
   const app = express();
@@ -64,6 +66,8 @@ function createApp() {
   app.use('/api/v1/invoices', invoiceRoutes);
   app.use('/api/v1/reports', reportRoutes);
   app.use('/api/v1/auditlogs', auditLogRoutes);
+  app.use('/api/v1/trucks', truckRoutes);
+  app.use('/api/v1/transporters', transporterRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -5,7 +5,8 @@ const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const auditService = require('../services/auditService');
 const { verifyAndIssueTokens } = require('../utils/loginHelper');
-const { AUDIT_ACTIONS, ROLES } = require('../config/constants');
+const { AUDIT_ACTIONS, ROLES, USER_STATUS, SOCKET_EVENTS } = require('../config/constants');
+const { emitToAdmins } = require('../config/socket');
 const {
   signAccessToken,
   signRefreshToken,
@@ -76,6 +77,60 @@ const register = asyncHandler(async (req, res) => {
   res.status(201).json({
     success: true,
     message: 'User created successfully',
+    user: user.toSafeJSON()
+  });
+});
+
+// POST /auth/signup (public) - self-service Branch Manager signup. No branchId
+// is collected here: the account is created PENDING_APPROVAL with no branch,
+// and a Super Admin must assign a branch and approve it (PUT /users/:id/approve)
+// before the account can log in.
+const signup = asyncHandler(async (req, res) => {
+  const { firstName, lastName, email, phone, password } = req.body;
+
+  if (!firstName || !lastName || !email || !password) {
+    throw ApiError.badRequest('MISSING_FIELDS', 'firstName, lastName, email, and password are required');
+  }
+  if (!EMAIL_REGEX.test(email)) {
+    throw ApiError.badRequest('INVALID_EMAIL', 'Invalid email format');
+  }
+  validatePassword(password, email);
+
+  const existing = await User.findOne({ email: email.toLowerCase() });
+  if (existing) {
+    throw ApiError.badRequest('EMAIL_EXISTS', 'Email already exists');
+  }
+
+  const hashed = await bcrypt.hash(password, 10);
+  const user = await User.create({
+    firstName,
+    lastName,
+    email: email.toLowerCase(),
+    phone,
+    password: hashed,
+    role: ROLES.BRANCH_MANAGER,
+    branchId: null,
+    status: USER_STATUS.PENDING_APPROVAL
+  });
+
+  await auditService.log({
+    entityType: 'USER',
+    entityId: user._id,
+    action: AUDIT_ACTIONS.CREATE,
+    user: { userId: user._id, firstName: user.firstName, lastName: user.lastName, role: user.role },
+    branchId: null,
+    description: `${user.email} self-registered and is awaiting admin approval`
+  });
+
+  emitToAdmins(SOCKET_EVENTS.MANAGER_REGISTERED, {
+    userId: user._id,
+    email: user.email,
+    name: `${user.firstName} ${user.lastName}`
+  });
+
+  res.status(201).json({
+    success: true,
+    message: 'Registration submitted. An admin will review your account and assign your branch.',
     user: user.toSafeJSON()
   });
 });
@@ -238,4 +293,4 @@ const resetPassword = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Password reset. User must login with new password.' });
 });
 
-module.exports = { register, login, refresh, logout, me, changePassword, resetPassword };
+module.exports = { register, signup, login, refresh, logout, me, changePassword, resetPassword };

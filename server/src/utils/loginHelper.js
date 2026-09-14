@@ -12,6 +12,12 @@ async function verifyAndIssueTokens(user, password, { rememberMe = false } = {})
   if (user.status === USER_STATUS.INACTIVE) {
     throw ApiError.forbidden('ACCOUNT_INACTIVE', 'Your account is inactive');
   }
+  if (user.status === USER_STATUS.PENDING_APPROVAL) {
+    throw ApiError.forbidden(
+      'ACCOUNT_PENDING_APPROVAL',
+      'Your account is awaiting admin approval and branch assignment'
+    );
+  }
   if (user.isLocked()) {
     throw ApiError.unauthorized('ACCOUNT_LOCKED', 'Account locked. Try again in 30 minutes');
   }

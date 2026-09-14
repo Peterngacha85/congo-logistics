@@ -8,5 +8,6 @@ router.use(requireAuth);
 
 router.get('/', invoiceController.listInvoices);
 router.get('/:invoiceId', invoiceController.getInvoice);
+router.get('/:invoiceId/download', invoiceController.downloadInvoice);
 
 module.exports = router;

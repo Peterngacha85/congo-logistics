@@ -11,5 +11,6 @@ router.get('/', branchController.listBranches);
 router.get('/:branchId', branchController.getBranch);
 router.post('/', requireRole(ROLES.SUPER_ADMIN), branchController.createBranch);
 router.put('/:branchId', branchController.updateBranch);
+router.delete('/:branchId', requireRole(ROLES.SUPER_ADMIN), branchController.deleteBranch);
 
 module.exports = router;

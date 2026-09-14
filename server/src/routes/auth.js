@@ -14,7 +14,16 @@ const loginLimiter = rateLimit({
   message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many login attempts. Try again later.' } }
 });
 
+const signupLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many signup attempts. Try again later.' } }
+});
+
 router.post('/register', requireAuth, requireRole(ROLES.SUPER_ADMIN), authController.register);
+router.post('/signup', signupLimiter, authController.signup);
 router.post('/login', loginLimiter, authController.login);
 router.post('/refresh', authController.refresh);
 router.post('/logout', authController.logout);

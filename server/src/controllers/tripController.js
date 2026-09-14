@@ -1,5 +1,7 @@
 const Trip = require('../models/Trip');
 const Branch = require('../models/Branch');
+const Truck = require('../models/Truck');
+const Transporter = require('../models/Transporter');
 const Invoice = require('../models/Invoice');
 const Payment = require('../models/Payment');
 const AuditLog = require('../models/AuditLog');
@@ -14,8 +16,10 @@ const {
   TRIP_STATUS,
   ALLOWED_STATUS_TRANSITIONS,
   AUDIT_ACTIONS,
-  PAYMENT_METHODS
+  PAYMENT_METHODS,
+  SOCKET_EVENTS
 } = require('../config/constants');
+const { emitToAdminsAndBranch } = require('../config/socket');
 
 function scopeToBranch(req, query = {}) {
   if (req.user.role === ROLES.BRANCH_MANAGER) {
@@ -113,13 +117,13 @@ const getTrip = asyncHandler(async (req, res) => {
 // POST /trips
 const createTrip = asyncHandler(async (req, res) => {
   const {
-    truckNumber,
+    truckId,
+    transporterId,
     trailerNumber,
     loadingPoint,
     offloadingPoint,
     dateLoaded,
     dateOffloaded,
-    transporterName,
     transportationRate,
     dieselPerTrip,
     mileageCash,
@@ -129,12 +133,12 @@ const createTrip = asyncHandler(async (req, res) => {
   const branchId = req.user.role === ROLES.BRANCH_MANAGER ? req.user.branchId : req.body.branchId;
 
   if (
-    !truckNumber ||
+    !truckId ||
+    !transporterId ||
     !loadingPoint ||
     !offloadingPoint ||
     !dateLoaded ||
     !dateOffloaded ||
-    !transporterName ||
     transportationRate === undefined ||
     dieselPerTrip === undefined ||
     mileageCash === undefined ||
@@ -159,6 +163,30 @@ const createTrip = asyncHandler(async (req, res) => {
   const branch = await Branch.findById(branchId);
   if (!branch) throw ApiError.badRequest('INVALID_BRANCH', 'Branch does not exist');
 
+  const truck = await Truck.findById(truckId);
+  if (!truck) throw ApiError.badRequest('INVALID_TRUCK', 'Truck does not exist');
+  if (truck.approvalStatus !== 'APPROVED') {
+    throw ApiError.badRequest('TRUCK_NOT_APPROVED', 'This truck is still awaiting admin approval');
+  }
+  if (truck.branchId && truck.branchId.toString() !== branchId.toString()) {
+    throw ApiError.badRequest('TRUCK_WRONG_BRANCH', 'This truck is not available for your branch');
+  }
+
+  const transporter = await Transporter.findById(transporterId);
+  if (!transporter) throw ApiError.badRequest('INVALID_TRANSPORTER', 'Driver/transporter does not exist');
+  if (transporter.approvalStatus !== 'APPROVED') {
+    throw ApiError.badRequest('TRANSPORTER_NOT_APPROVED', 'This driver is still awaiting admin approval');
+  }
+  if (
+    transporter.branchIds.length > 0 &&
+    !transporter.branchIds.some((id) => id.toString() === branchId.toString())
+  ) {
+    throw ApiError.badRequest('TRANSPORTER_WRONG_BRANCH', 'This driver is not available for your branch');
+  }
+
+  const truckNumber = truck.truckNumber;
+  const transporterName = transporter.name;
+
   const startOfDay = new Date(new Date(dateLoaded).setHours(0, 0, 0, 0));
   const endOfDay = new Date(new Date(dateLoaded).setHours(23, 59, 59, 999));
   const duplicate = await Trip.findOne({
@@ -176,12 +204,14 @@ const createTrip = asyncHandler(async (req, res) => {
   const trip = await Trip.create({
     tripNumber,
     truckNumber,
-    trailerNumber,
+    truckId: truck._id,
+    trailerNumber: trailerNumber || truck.trailerNumber,
     loadingPoint,
     offloadingPoint,
     dateLoaded,
     dateOffloaded,
     transporterName,
+    transporterId: transporter._id,
     transportationRate,
     dieselPerTrip,
     mileageCash,
@@ -204,6 +234,12 @@ const createTrip = asyncHandler(async (req, res) => {
     changes: { tripNumber: trip.tripNumber, status: trip.status, truckNumber: trip.truckNumber }
   });
 
+  emitToAdminsAndBranch(trip.branchId, SOCKET_EVENTS.TRIP_CREATED, {
+    tripId: trip._id,
+    tripNumber: trip.tripNumber,
+    branchId: trip.branchId
+  });
+
   res.status(201).json({
     success: true,
     message: 'Trip created successfully',
@@ -221,13 +257,11 @@ const updateTrip = asyncHandler(async (req, res) => {
   }
 
   const editableFields = [
-    'truckNumber',
     'trailerNumber',
     'loadingPoint',
     'offloadingPoint',
     'dateLoaded',
     'dateOffloaded',
-    'transporterName',
     'transportationRate',
     'dieselPerTrip',
     'mileageCash',
@@ -241,6 +275,28 @@ const updateTrip = asyncHandler(async (req, res) => {
       trip[field] = req.body[field];
     }
   });
+
+  if (req.body.truckId && req.body.truckId !== String(trip.truckId)) {
+    const truck = await Truck.findById(req.body.truckId);
+    if (!truck) throw ApiError.badRequest('INVALID_TRUCK', 'Truck does not exist');
+    if (truck.approvalStatus !== 'APPROVED') {
+      throw ApiError.badRequest('TRUCK_NOT_APPROVED', 'This truck is still awaiting admin approval');
+    }
+    changes.truckNumber = { oldValue: trip.truckNumber, newValue: truck.truckNumber };
+    trip.truckId = truck._id;
+    trip.truckNumber = truck.truckNumber;
+  }
+
+  if (req.body.transporterId && req.body.transporterId !== String(trip.transporterId)) {
+    const transporter = await Transporter.findById(req.body.transporterId);
+    if (!transporter) throw ApiError.badRequest('INVALID_TRANSPORTER', 'Driver/transporter does not exist');
+    if (transporter.approvalStatus !== 'APPROVED') {
+      throw ApiError.badRequest('TRANSPORTER_NOT_APPROVED', 'This driver is still awaiting admin approval');
+    }
+    changes.transporterName = { oldValue: trip.transporterName, newValue: transporter.name };
+    trip.transporterId = transporter._id;
+    trip.transporterName = transporter.name;
+  }
 
   if (trip.dateOffloaded && trip.dateLoaded && new Date(trip.dateOffloaded) < new Date(trip.dateLoaded)) {
     throw ApiError.badRequest('INVALID_DATE', 'Date offloaded cannot be before date loaded');
@@ -268,6 +324,12 @@ const updateTrip = asyncHandler(async (req, res) => {
       description: `Trip ${trip.tripNumber} updated`,
       changes
     });
+
+    emitToAdminsAndBranch(trip.branchId, SOCKET_EVENTS.TRIP_UPDATED, {
+      tripId: trip._id,
+      tripNumber: trip.tripNumber,
+      branchId: trip.branchId
+    });
   }
 
   res.json({
@@ -277,15 +339,19 @@ const updateTrip = asyncHandler(async (req, res) => {
   });
 });
 
-// DELETE /trips/:tripId
+// DELETE /trips/:tripId - Branch managers may only delete PENDING trips.
+// Super Admin can delete a trip in any status (override, logged as such).
 const deleteTrip = asyncHandler(async (req, res) => {
   const trip = await Trip.findById(req.params.tripId);
   await assertTripAccessible(req, trip);
 
-  if (trip.status !== TRIP_STATUS.PENDING) {
+  const isAdminOverride = req.user.role === ROLES.SUPER_ADMIN && trip.status !== TRIP_STATUS.PENDING;
+
+  if (req.user.role === ROLES.BRANCH_MANAGER && trip.status !== TRIP_STATUS.PENDING) {
     throw ApiError.badRequest('TRIP_NOT_DELETABLE', 'Only pending trips can be deleted');
   }
 
+  const previousStatus = trip.status;
   await trip.deleteOne();
 
   await auditService.log({
@@ -294,8 +360,16 @@ const deleteTrip = asyncHandler(async (req, res) => {
     action: AUDIT_ACTIONS.DELETE,
     user: req.user,
     branchId: trip.branchId,
-    description: `Trip ${trip.tripNumber} deleted`,
-    changes: { deletedAt: new Date() }
+    description: isAdminOverride
+      ? `Trip ${trip.tripNumber} deleted by Super Admin override (was ${previousStatus})`
+      : `Trip ${trip.tripNumber} deleted`,
+    changes: { deletedAt: new Date(), previousStatus }
+  });
+
+  emitToAdminsAndBranch(trip.branchId, SOCKET_EVENTS.TRIP_DELETED, {
+    tripId: trip._id,
+    tripNumber: trip.tripNumber,
+    branchId: trip.branchId
   });
 
   res.json({ success: true, message: 'Trip deleted successfully' });
@@ -337,6 +411,13 @@ const updateStatus = asyncHandler(async (req, res) => {
     branchId: trip.branchId,
     description: `Trip ${trip.tripNumber} status changed from ${oldStatus} to ${status}${notes ? ` (${notes})` : ''}`,
     changes: { status: { oldValue: oldStatus, newValue: status } }
+  });
+
+  emitToAdminsAndBranch(trip.branchId, SOCKET_EVENTS.TRIP_STATUS_CHANGED, {
+    tripId: trip._id,
+    tripNumber: trip.tripNumber,
+    branchId: trip.branchId,
+    status
   });
 
   res.json({
@@ -420,6 +501,13 @@ const approveTrip = asyncHandler(async (req, res) => {
       invoiceNumber,
       invoiceGeneratedAt: trip.invoiceGeneratedAt
     }
+  });
+
+  emitToAdminsAndBranch(trip.branchId, SOCKET_EVENTS.TRIP_INVOICED, {
+    tripId: trip._id,
+    tripNumber: trip.tripNumber,
+    branchId: trip.branchId,
+    invoiceNumber
   });
 
   res.json({
@@ -522,6 +610,12 @@ const markAsPaid = asyncHandler(async (req, res) => {
       paymentMethod,
       confirmationRef
     }
+  });
+
+  emitToAdminsAndBranch(trip.branchId, SOCKET_EVENTS.TRIP_PAID, {
+    tripId: trip._id,
+    tripNumber: trip.tripNumber,
+    branchId: trip.branchId
   });
 
   res.json({

@@ -1,16 +1,20 @@
 require('dotenv').config();
+const http = require('http');
 const createApp = require('./app');
 const { connectDatabase } = require('./config/database');
-const { ensureSuperAdmin } = require('./config/bootstrapAdmin');
+const { ensureSuperAdmins } = require('./config/bootstrapAdmin');
+const { initSocket } = require('./config/socket');
 
 const PORT = process.env.API_PORT || 5000;
 
 async function start() {
   await connectDatabase();
-  await ensureSuperAdmin();
+  await ensureSuperAdmins();
   const app = createApp();
+  const httpServer = http.createServer(app);
+  initSocket(httpServer);
 
-  app.listen(PORT, () => {
+  httpServer.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log(`Health check: http://localhost:${PORT}/health`);
   });
