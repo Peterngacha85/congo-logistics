@@ -16,16 +16,18 @@ export default function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-primary-800 bg-primary-600 px-6">
       <div className="flex items-center gap-3">
-        <img src="/logo.png" alt="Congo Logistics" className="h-8 w-auto" />
+        <div className="rounded-md bg-white px-2 py-1">
+          <img src="/logo.png" alt="Congo Logistics" className="h-8 w-auto" />
+        </div>
       </div>
       <div className="flex items-center gap-4">
         <div className="text-right">
-          <p className="text-sm font-medium text-slate-900">
+          <p className="text-sm font-medium text-white">
             {user?.firstName} {user?.lastName}
           </p>
-          <p className="text-xs text-slate-500">{user?.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Branch Manager'}</p>
+          <p className="text-xs text-primary-100">{user?.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Branch Manager'}</p>
         </div>
         <Button variant="secondary" onClick={handleLogout}>
           Logout
